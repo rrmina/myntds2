@@ -1,8 +1,13 @@
 import os
 import boto3
-import pandas as pd
+import pickle
+from typing import Any
+
 from io import BytesIO
 from dotenv import load_dotenv
+import pandas as pd
+
+
 
 class SimpleS3:
     def __init__(self,
@@ -12,6 +17,29 @@ class SimpleS3:
         s3 = boto3.resource('s3')
         self.bucket = s3.Bucket(bucket)
     
+    def write_pickle(self,
+        key: str,
+        data: Any
+    ):
+        with BytesIO() as f:
+            pickle.dump(data, f)
+            payload = f.getvalue()
+            
+        bucket_obj = self.bucket.Object(key=key)
+        bucket_obj.put(Body=payload)
+        
+    def read_pickle(self,
+        key: str
+    ) -> Any:
+        
+        bucket_obj = self.bucket.Object(key=key)
+        get_object_result = bucket_obj.get()['Body']
+        result = get_object_result.read()
+        bytes_object = BytesIO(result)
+        data = pickle.load(bytes_object)
+        
+        return data
+    
     def write_feather(self,
         key: str,
         df: pd.DataFrame
@@ -19,10 +47,10 @@ class SimpleS3:
         
         with BytesIO() as f:
             df.to_feather(f)
-            data = f.getvalue()
+            payload = f.getvalue()
         
         bucket_obj = self.bucket.Object(key=key)
-        bucket_obj.put(Body=data)
+        bucket_obj.put(Body=payload)
     
     def read_feather(self,
         key: str
@@ -43,10 +71,10 @@ class SimpleS3:
         
         with BytesIO() as f:
             df.to_parquet(f, index=False)
-            data = f.getvalue()
+            payload = f.getvalue()
             
         bucket_obj = self.bucket.Object(key=key)
-        bucket_obj.put(Body=data)
+        bucket_obj.put(Body=payload)
         
     def read_parquet(self,
         key: str
