@@ -7,9 +7,7 @@ from io import BytesIO
 from dotenv import load_dotenv
 import pandas as pd
 
-
-
-class SimpleS3:
+class SimpleS3Client:
     def __init__(self,
         bucket: str = 'myntanalytics'
     ):

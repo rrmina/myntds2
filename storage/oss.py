@@ -4,7 +4,7 @@ import pandas as pd
 from io import BytesIO
 from dotenv import load_dotenv
     
-class SimpleOSS:
+class SimpleOSSClient:
     def __init__(self,
         access_id_key: str = 'ODPS_ID',
         secret_access_key_key: str = 'ODPS_SECRET',

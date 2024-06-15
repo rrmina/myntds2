@@ -2,7 +2,7 @@ import os
 import odps
 from dotenv import load_dotenv
 
-class SimpleODPS:
+class SimpleODPSClient:
     def __init__(self, 
         access_id_key: str = 'ODPS_ID',
         secret_access_key_key: str = 'ODPS_SECRET',
