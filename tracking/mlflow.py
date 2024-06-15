@@ -14,18 +14,15 @@ class MLflowClientWrapper:
     ):
         
         load_dotenv()
-        
         if prod:
             uri = os.getenv('MLFLOW_PROD_URI')
         else:
             uri = os.getenv('MLFLOW_DEV_URI')
             
-        print(uri)
-            
         self.client = MlflowClient(uri)
         self.experiment_name = None
         self.experiment_id = None
-        self.run_client = None
+        self.run_object = None
         self.run_name = None
         self.run_id = None
     
@@ -78,13 +75,13 @@ class MLflowClientWrapper:
             tags['Owner'] = os.uname()[1].split("-")[1]
             
         # Create Run Object
-        self.run_client = self.client.create_run(
+        self.run_object = self.client.create_run(
             experiment_id = self.experiment_id,
             tags = tags
         )
     
     def set_run(self,
-        run_name: str,
+        run_name: str
     ):
         assert self.experiment_id is not None, f"experiment_id or experiment_name is None. Finish 'set_experiment()' first"
         
@@ -99,7 +96,7 @@ class MLflowClientWrapper:
             
         self.run_id = run_id
         self.run_name = run_name
-        self.run_client = self.get_run(run_name=run_name)
+        self.run_object = self.get_run(run_name=run_name)
         
         print(f"Set the run to '{run_name}' in experiment '{self.experiment_name}'")
         
@@ -140,12 +137,11 @@ class MLflowClientWrapper:
             tags = []
         )
 
-    def get_params(self,
-        run_name: str
+    def get_params(self
+        
     ) -> Union[Dict, None]:
         
-        run_object = self.get_run(run_name=run_name)
-        params = run_object.data.params
+        params = self.run_object.data.params
         
         return params
         
@@ -170,12 +166,11 @@ class MLflowClientWrapper:
             tags = []
         )
     
-    def get_metrics(self,
-        run_name: str
+    def get_metrics(self
+        
     ) -> Union[Dict, None]:
         
-        run_object = self.get_run(run_name=run_name)
-        metrics = run_object.data.metrics
+        metrics = self.run_object.data.metrics
         
         return metrics
     
@@ -198,22 +193,28 @@ class MLflowClientWrapper:
             tags = tags_arr
         )
     
-    def get_tags(self,
-        run_name: str
+    def get_tags(self
+
     ) -> Union[Dict, None]:
         
-        run_object = self.get_run(run_name=run_name)
-        tags = run_object.data.tags
+        tags = self.run_object.data.tags
         
         return tags
     
     def log_model_sklearn(self,
         sk_model: Any,
         artifact_path: str,
-        registered_model_name: Optional[str] = None
+        registered_model_name: Optional[str] = None,
+        signature: Optional[str] = None
     ):
         
-        self._log_model_mlflow(
+        # Check if artifact path exists
+        model_versions = self.client.search_model_versions(f"run_id='{self.run_id}'")
+        artifact_paths = ["/".join(model_version.source.split('/')[8:]) for model_version in model_versions]
+        if artifact_path in artifact_paths:
+            raise ValueError(f"Artifact path '{artifact_path}' already exists. Please use a different artifact path.")
+        
+        return self._log_model_mlflow(
             sk_model = sk_model,                                # User-defined
             artifact_path = artifact_path,                      # User-defined
             registered_model_name = registered_model_name,      # User-defined
@@ -221,7 +222,7 @@ class MLflowClientWrapper:
             mlflow_client = self.client,                        # User-defined surgery
             flavor = mlflow.sklearn,                            # Model-defined
             serialization_format = 'cloudpickle',               # the rest default values
-            signature = None,
+            signature = signature,
             input_example = None,
             await_registration_for = 300,
             pip_requirements = None,
@@ -231,9 +232,71 @@ class MLflowClientWrapper:
     def get_model_sklearn(self,
         registered_model_name: str,
         version: int
-    ):
-        return
+    ) -> Any:
+        
+        # Get model versions 
+        model_versions = self.client.search_model_versions(f"run_id='{self.run_id}'")
+        model_name_version_tuples = [(model_version.name, model_version.version) for model_version in model_versions]
+        
+        if (registered_model_name, str(version)) not in model_name_version_tuples:
+            raise ValueError(f"Model name '{registered_model_name}' version '{version}' in run '{self.run_name}' does not exist. Only these (name, version) tuples exist: {model_name_version_tuples}")
+
+        # Construct the model URI and load
+        model_uri = f"models:/{registered_model_name}/{version}"
+        model = mlflow.sklearn.load_model(model_uri)
+        
+        return model
     
+    def log_model_pytorch(self,
+        pytorch_model: Any,
+        artifact_path: str,
+        registered_model_name: Optional[str] = None,
+        signature: Optional[str] = None
+    ) -> Any:
+        
+        # Check if artifact path exists
+        model_versions = self.client.search_model_versions(f"run_id='{self.run_id}'")
+        artifact_paths = ["/".join(model_version.source.split('/')[8:]) for model_version in model_versions]
+        if artifact_path in artifact_paths:
+            raise ValueError(f"Artifact path '{artifact_path}' already exists. Please use a different artifact path.")
+            
+        return self._log_model_mlflow(
+            pytorch_model = pytorch_model,                      # User-defined
+            artifact_path = artifact_path,                      # User-defined
+            registered_model_name = registered_model_name,      # User-defined
+            run_id = self.run_id,                               # User-defined surgery
+            mlflow_client = self.client,                        # User-defined surgery
+            flavor = mlflow.pytorch,                            # Model-defined
+            conda_env=None,                                     # the rest default values
+            code_paths=None,
+            pickle_module=None,
+            signature=signature,
+            input_example=None,
+            await_registration_for=300,
+            requirements_file=None,
+            extra_files=None,
+            pip_requirements=None,
+            extra_pip_requirements=None
+        )
+    
+    def get_model_pytorch(self,
+        registered_model_name: str,
+        version: int
+    ) -> Any:
+
+        # Get model versions 
+        model_versions = self.client.search_model_versions(f"run_id='{self.run_id}'")
+        model_name_version_tuples = [(model_version.name, model_version.version) for model_version in model_versions]
+        
+        if (registered_model_name, str(version)) not in model_name_version_tuples:
+            raise ValueError(f"Model name '{registered_model_name}' version '{version}' in run '{self.run_name}' does not exist. Only these (name, version) tuples exist: {model_name_version_tuples}")
+
+        # Construct the model URI and load
+        model_uri = f"models:/{registered_model_name}/{version}"
+        model = mlflow.pytorch.load_model(model_uri)
+        
+        return model
+        
     # We want to move away from this by using the latest version instead of 1.24
     @staticmethod
     def _log_model_mlflow(
@@ -247,10 +310,20 @@ class MLflowClientWrapper:
     ):
         with TempDir() as tmp:
             local_path = tmp.path("model")
+            
+            # Instantiate mlflow Model Class
             mlflow_model = mlflow.models.Model(artifact_path=artifact_path, run_id=run_id)
+            
+            # Save model according to flavor to a local path
             flavor.save_model(path=local_path, mlflow_model=mlflow_model, **kwargs)
+            
+            # Transfer the artifacts from local path to artifact path
             mlflow_client.log_artifacts(run_id, local_path, artifact_path)
+            
+            # Attach mlflow model to run 
             mlflow_client._record_logged_model(run_id, mlflow_model)
+            
+            # Register model to model site and for versioning
             if registered_model_name is not None:
                 mlflow.register_model(
                     "runs:/%s/%s" % (run_id, artifact_path),
@@ -300,5 +373,5 @@ class MLflowClientWrapper:
     
     def __str__(self):
         string = f'experiment_name={self.experiment_name}, experiment_id={self.experiment_id},\n \
-        run_client={self.run_client}, run_name={self.run_name}, run_id={self.run_id}'
+        run_object={self.run_object}, run_name={self.run_name}, run_id={self.run_id}'
         return string
