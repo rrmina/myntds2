@@ -72,12 +72,14 @@ class SimpleOSSClient:
     def list_parquet_paths_from_odps(self,
         project: str = 'mynt_ds_dev',
         table_name: str = None,
-        partition: str = None
+        partitions: str = None
     ) -> List[str]:
         
         t = self.o.get_table(name=table_name, project=project)
         parts = [key for key in t.location.split("/")[4:] if len(key) > 0]
-        parts.append(partition)
+        if partitions:
+            for partition in partitions.split(','):
+                parts.append(partition)
         prefix = "/".join(parts)
 
         paths = [
@@ -90,12 +92,12 @@ class SimpleOSSClient:
     def read_parquet_from_odps(self,
         project: str = 'mynt_ds_dev',
         table_name: str = None,
-        partition: str = None
+        partitions: str = None
     ) -> pd.DataFrame:
 
         parquet_list = self.list_parquet_paths_from_odps(
             table_name = table_name,
-            partition = partition,
+            partitions = partitions,
             project = project,
         )
         
