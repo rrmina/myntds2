@@ -1,3 +1,4 @@
+import re
 import time
 import functools
 import sys
@@ -7,9 +8,7 @@ import sys
 import traceback
 
 def prefix_print(prefix=""):
-    """
-    Decorator that prefixes print statements and errors with a customizable string.
-    """
+    """Decorator that prefixes print statements and errors with a customizable string."""
     def decorator(func):
         @functools.wraps(func)
         def wrapper(*args, **kwargs):
@@ -53,3 +52,11 @@ def get_current_time_millis():
     Returns the time in milliseconds since the epoch as an integer number.
     """
     return int(time.time() * 1000)
+
+def sanitize_mlflow_metric_name(name: str) -> str:
+    """
+    Convert a string to conform to MLflow's metric name rules:
+    - Only allows alphanumerics, underscores (_), dashes (-), periods (.), spaces ( ), and slashes (/)
+    - Replaces any invalid character with an underscore (_)
+    """
+    return re.sub(r"[^a-zA-Z0-9_\-./ ]", "_", name)
