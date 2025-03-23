@@ -5,8 +5,9 @@ import io
 import mlflow
 from dotenv import load_dotenv
 from mlflow.tracking import MlflowClient
+from mlflow.entities import Metric
 
-from .utils import prefix_print, sanitize_mlflow_metric_name
+from .utils import prefix_print, sanitize_mlflow_metric_name, get_current_time_millis
 
 # For assertion and type-hinting
 from mlflow.models import ModelSignature
@@ -199,8 +200,8 @@ class MLFlowClientWrapper:
         metrics: Dict[str, float],
         step: Optional[int] = None
     ):
-        for key, value in metrics.items():
-            self.log_metric(key=key, value=value, step=step)
+        metrics_batch = [Metric(key=key, value=value, timestamp=get_current_time_millis(), step=step) for key, value in metrics.items()]
+        self.client.log_batch(metrics_batch)
 
     @prefix_print("[LOG HISTORICAL METRIC]")
     def log_historical_metric(self,
@@ -213,8 +214,8 @@ class MLFlowClientWrapper:
             steps = list(i+1 for i in range(len(values)))
 
         key = sanitize_mlflow_metric_name(key)
-        for step, value in zip(steps, values):
-            self.client.log_metric(self.run_id, key=key, value=value, step=step) 
+        metrics = [Metric(key=key, value=value, timestamp=get_current_time_millis()+step, step=step) for step, value in zip(steps, values)]
+        self.client.log_batch(run_id=self.run_id, metrics=metrics)
 
     def log_historical_metrics(self,
         metrics: Dict[str, List[float]],
