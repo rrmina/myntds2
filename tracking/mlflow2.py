@@ -1,20 +1,26 @@
-from typing import Dict, Optional, Any, Union
+from typing import Dict, Optional, Any, Union, List
 
 import os
+import io
 import mlflow
 from dotenv import load_dotenv
 from mlflow.tracking import MlflowClient
+
+from .utils import prefix_print, sanitize_mlflow_metric_name
+
+# For assertion and type-hinting
 from mlflow.models import ModelSignature
+import matplotlib.pyplot as plt
+from PIL import Image
+import numpy as np
 
-from .utils import prefix_print
-
-class MLFlow2ClientWrapper:
+class MLFlowClientWrapper:
     def __init__(self):
         load_dotenv()
-        os.environ["MLFLOW_TRACKING_URI"] = "https://mlflow-internal.mynt.xyz"
-        os.environ["MLFLOW_TRACKING_USERNAME"] = "firstname.lastname"
-        os.environ["MLFLOW_TRACKING_PASSWORD"] = "check email for password"
-        uri = "https://mlflow-internal.mynt.xyz"
+        os.environ["MLFLOW_TRACKING_URI"] = "https://"
+        os.environ["MLFLOW_TRACKING_USERNAME"] = ""
+        os.environ["MLFLOW_TRACKING_PASSWORD"] = ""
+        uri = "https://"
 
         self.client = MlflowClient(uri)
 
@@ -23,6 +29,7 @@ class MLFlow2ClientWrapper:
         self.experiment_id = None
         self.run_name = None
         self.run_id = None
+        self.run_object = None
 
         # Do not edit
         self.flavor_lib_dict = {
@@ -176,17 +183,45 @@ class MLFlow2ClientWrapper:
     #
     #############################################################################################################
 
+    @prefix_print("[LOG METRIC]")
     def log_metric(self,
         key: str,
-        value: float
+        value: Union[float, List[float]],
+        step: Optional[int] = None,
+        is_print: Optional[bool] = True
     ):
-        self.client.log_metric(self.run_id, key=key, value=value)
+        key = sanitize_mlflow_metric_name(key)
+        if is_print:
+            print(f"Logging metric '{key}'={value}")
+        self.client.log_metric(self.run_id, key=key, value=value, step=step, synchronous=False)
 
     def log_metrics(self,
-        metrics: Dict[str, float]
+        metrics: Dict[str, float],
+        step: Optional[int] = None
     ):
         for key, value in metrics.items():
-            self.log_metric(key=key, value=value)
+            self.log_metric(key=key, value=value, step=step)
+
+    @prefix_print("[LOG HISTORICAL METRIC]")
+    def log_historical_metric(self,
+        key: str,
+        values: Union[float, List[float]],
+        steps: List[int] = None
+    ):
+        print(f"Logging historical metric '{key}'")
+        if steps is None:
+            steps = list(i+1 for i in range(len(values)))
+
+        key = sanitize_mlflow_metric_name(key)
+        for step, value in zip(steps, values):
+            self.client.log_metric(self.run_id, key=key, value=value, step=step) 
+
+    def log_historical_metrics(self,
+        metrics: Dict[str, List[float]],
+        steps: List[int] = None
+    ):
+        for key, values in metrics.items():
+            self.log_historical_metric(key=key, values=values, steps=steps)
 
     def get_metrics(self
                     
@@ -342,6 +377,38 @@ class MLFlow2ClientWrapper:
 
         return model
     
+    #############################################################################################################
+    #
+    #                                           Log Artifacts Model
+    #
+    #############################################################################################################    
+
+    @prefix_print('[LOG IMAGE]')
+    def log_image(self,
+        image: Any,
+        artifact_path: str
+    ):  
+        assert self.run_id is not None, "No active run MLFlow run found. Set the run via set_run() before logging an image."
+        assert isinstance(image, (plt.Figure, Image.Image, np.ndarray, mlflow.Image)), "Expected a Matplotlib Figure or PIL Image or numpy.ndarray of mlflow image"
+        file_extension = artifact_path.split('.')[-1]
+        assert file_extension in ['jpg', 'png'], "artifact_name should be saved as a .png or .jpg file"
+
+        # Check if artifact_path exists
+        root_folder = artifact_path.split('/')[0]
+        artifact_paths = [file_info.path for file_info in self.client.list_artifacts(self.run_id)]
+        if root_folder not in artifact_paths:
+            raise ValueError(f"The artifact_path '{root_folder}' does not exist in '{self.run_name}'. Please provide an existing artifact_path.")
+
+        # Convert Image if given a plt.Figure
+        if isinstance(image, plt.Figure):
+            buf = io.BytesIO()
+            image.savefig(buf, format=file_extension)
+            buf.seek(0)
+            image = Image.open(buf)
+
+        with mlflow.start_run(run_id=self.run_id):
+            mlflow.log_image(image, artifact_path)
+        
     #############################################################################################################
     #
     #                                                  misc
