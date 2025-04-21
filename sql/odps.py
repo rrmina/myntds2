@@ -37,13 +37,19 @@ class SimpleODPSClient:
     
     def execute_sql_to_df(self,
         query: str = None
-    ) -> odps.models.Instance:
+    ) -> pd.DataFrame:
         
-        sql_instance = self.o.execute_sql(query)
+        sql_instance = self.execute_sql(query)
     
-        with sql_instance.open_reader(tunnel=True, limit=False) as reader:
-            df = reader.to_pandas()
-            
+        values = []
+        with sql_instance.open_reader() as reader:
+            for record in reader:
+                values.append(record.values)
+
+        # To Fix formatting of SHOW PARTITIONS
+
+        df = pd.DataFrame(values, columns=list(record._name_indexes.keys()))
+                          
         return df
     
     #############################################################################################################
