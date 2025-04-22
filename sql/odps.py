@@ -29,6 +29,22 @@ class SimpleODPSClient:
     #
     #############################################################################################################
 
+    def run_sql(self,
+        query: str = None
+    ) -> odps.models.Instance:
+        
+        return self.o.run_sql(query, hints={"odps.sql.submit.mode" : "script"})
+
+    def run_sql_template(self,
+        query_template: str = None,
+        args_dict: Dict = None
+    ) -> odps.models.Instance:
+        
+        for key in args_dict.keys():
+            query_template = query_template.replace('${'+key+'}', args_dict[key])
+
+        return self.run_sql(query_template)
+
     def execute_sql(self,
         query: str = None
     ) -> odps.models.Instance:
