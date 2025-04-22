@@ -18,14 +18,14 @@ class SimpleODPSClient:
         load_dotenv()
         access_id = os.getenv(access_id_key)
         secret_access_key = os.getenv(secret_access_key_key)
-        self.project = os.getenv(project_key, default='mynt_ds_dev')
+        self.project = os.getenv(project_key, default='gcash_ml_sandbox')
         
         # Initialize ODPS
         self.o = odps.ODPS(access_id=access_id, secret_access_key=secret_access_key, project=self.project, endpoint=endpoint)
 
     #############################################################################################################
     #
-    #                                              Execution Methods
+    #                                        Run and Run-Tracking Methods
     #
     #############################################################################################################
 
@@ -44,6 +44,25 @@ class SimpleODPSClient:
             query_template = query_template.replace('${'+key+'}', args_dict[key])
 
         return self.run_sql(query_template)
+
+    def parallel_run_sql_template(self,
+        query_template: str = None,
+        partition_values_dict: Dict[str, List[str]] = None,
+        max_workers: int = None
+    ) -> List[odps.models.Instance]:
+        
+        return self._parallel_executor_template(
+            fn_executor=self.run_sql_template,
+            query_template=query_template,
+            partition_values_dict=partition_values_dict,
+            max_workers=max_workers
+        )
+
+    #############################################################################################################
+    #
+    #                                              Execution Methods
+    #
+    #############################################################################################################
 
     def execute_sql(self,
         query: str = None
@@ -87,6 +106,65 @@ class SimpleODPSClient:
             df = reader.to_pandas()
             
         return df
+
+    def parallel_execute_sql_template(self,
+        query_template: str = None,
+        partition_values_dict: Dict[str, List[str]] = None,
+        max_workers: int = None
+    ) -> List[odps.models.Instance]:
+        
+        return self._parallel_executor_template(
+            fn_executor=self.execute_sql_template,
+            query_template=query_template,
+            partition_values_dict=partition_values_dict,
+            max_workers=max_workers
+        )
+
+    #############################################################################################################
+    #
+    #                                             Parallel Methods
+    #
+    #############################################################################################################
+
+    def _parallel_executor_template(self,
+        fn_executor: Callable,
+        query_template: str = None,
+        partition_values_dict: Dict[str, List[str]] = None,
+        max_workers: int = None
+    ) -> List[odps.models.Instance]:
+        
+        assert partition_values_dict, "Must provide at least one partition key with values"
+        
+        partition_lengths = [len(v) for v in partition_values_dict.values()]
+        assert partition_lengths, "Partition lists cannot be empty"
+        assert all(x == partition_lengths[0] for x in partition_lengths), "All partition lists must have the same length"
+
+        num_partitions = partition_lengths[0]
+        arg_dicts = [{k: v[i] for k,v in partition_values_dict.items()} for i in range(num_partitions)]
+
+        def execute_query(
+            query_template: str,
+            args_dict: Dict[str, str]
+        ) -> odps.models.Instance:
+            
+            return fn_executor(
+                query_template=query_template,
+                args_dict=args_dict
+            )
+        
+        partial_func = partial(execute_query, query_template)
+
+        futures = []
+        with ThreadPoolExecutor(max_workers=max_workers) as executor:
+            futures = [executor.submit(partial_func, curr_dict) for curr_dict in arg_dicts]
+
+            for future in as_completed(futures):
+                try:
+                    result = future.result()
+                except Exception as e:
+                    print(f'Error: {e}')
+
+        return futures
 
     #############################################################################################################
     #
