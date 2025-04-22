@@ -48,9 +48,9 @@ class SimpleODPSClient:
     def execute_sql(self,
         query: str = None
     ) -> odps.models.Instance:
-        
+
         return self.o.execute_sql(query, hints={"odps.sql.submit.mode" : "script"})
-    
+
     def execute_sql_to_df(self,
         query: str = None
     ) -> pd.DataFrame:
@@ -62,12 +62,32 @@ class SimpleODPSClient:
             for record in reader:
                 values.append(record.values)
 
-        # To Fix formatting of SHOW PARTITIONS
-
         df = pd.DataFrame(values, columns=list(record._name_indexes.keys()))
                           
         return df
     
+    def execute_sql_template(self,
+        query_template: str = None,
+        args_dict: Dict = None
+    ) -> odps.models.Instance:
+        
+        for key in args_dict.keys():
+            query_template = query_template.replace('${'+key+'}', args_dict[key])
+
+        return self.execute_sql(query_template)
+
+    def execute_sql_template_to_df(self,
+        query_template: str = None,
+        args_dict: Dict = None
+    ) -> pd.DataFrame:
+        
+        sql_instance = self.execute_sql_template(query_template, args_dict)
+
+        with sql_instance.open_reader(tunnel=True, limit=False) as reader:
+            df = reader.to_pandas()
+            
+        return df
+
     #############################################################################################################
     #
     #                                               DDL Methods
@@ -124,6 +144,9 @@ class SimpleODPSClient:
         external = False
     ) -> str:
 
+        if isinstance(partition_names, str):
+            partition_names = [partition_names] 
+
         # Pandas to MaxCompute Aliyun SQL Types - Can be extended
         sql_type_dict = {
             np.dtype('O'): 'STRING',
@@ -161,7 +184,10 @@ class SimpleODPSClient:
         force_drop = False,
         external = False
     ) -> str:
-        
+
+        if isinstance(partition_names, str):
+            partition_names = [partition_names] 
+
         table = self.o.get_table(reference_odps_table_name)
         schema = table.table_schema
         table_columns = schema.simple_columns
