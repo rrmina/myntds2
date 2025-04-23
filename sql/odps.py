@@ -4,7 +4,9 @@ from odps.df import DataFrame as ODPSDataFrame
 import pandas as pd
 import numpy as np
 from dotenv import load_dotenv
-from typing import List, Tuple
+from typing import List, Tuple, Dict, Callable
+from concurrent.futures import ThreadPoolExecutor, as_completed
+from functools import partial
 
 class SimpleODPSClient:
     def __init__(self, 
