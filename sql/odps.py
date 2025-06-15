@@ -7,6 +7,9 @@ from dotenv import load_dotenv
 from typing import List, Tuple, Dict, Callable
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from functools import partial
+from tqdm import tqdm
+
+from .utils import random_alphanumeric_string
 
 class SimpleODPSClient:
     def __init__(self, 
@@ -96,18 +99,20 @@ class SimpleODPSClient:
             query_template = query_template.replace('${'+key+'}', args_dict[key])
 
         return self.execute_sql(query_template)
-
     
     def mapreduce_execute_sql_to_df(self,
         query: str = None,              # must be a select statement ONLY
         num_partitions: int = 32,
-        temp_table: str = 'tmp_rusty'
+        temp_table_name: str = None
     ) -> pd.DataFrame:
         
+        if temp_table_name is None:
+            temp_table_name = random_alphanumeric_string(length=10)
+
         partition_query = \
         f'''
-            DROP TABLE IF EXISTS {self.project}.{temp_table};
-            CREATE TABLE IF NOT EXISTS {self.project}.{temp_table} AS (
+            DROP TABLE IF EXISTS {self.project}.{temp_table_name};
+            CREATE TABLE IF NOT EXISTS {self.project}.{temp_table_name} AS (
                 SELECT
                     *,
                     NTILE({num_partitions}) OVER () AS partition_num
@@ -118,7 +123,7 @@ class SimpleODPSClient:
         '''
 
         # a partition blocking function
-        print(f'Dividing query result into {num_partitions} partitions')
+        print(f'Dividing query result into {num_partitions} partitions stored in {self.project}.{temp_table_name}')
         _ = self.execute_sql(partition_query)   
 
         # map definition
@@ -126,7 +131,7 @@ class SimpleODPSClient:
             df = self.execute_sql_to_df(
                 f'''
                 SELECT *
-                FROM {self.project}.{temp_table}
+                FROM {self.project}.{temp_table_name}
                 WHERE partition_num = '{i+1}'
                 '''
             )
@@ -141,7 +146,7 @@ class SimpleODPSClient:
             future_to_index = {executor.submit(fetch_partition, i): i for i in range(num_partitions)}
 
             # track status
-            for future in tqdm(as_completed(future_to_index), total=num_partitions, desc=f'Fetching partitions: '):
+            for future in tqdm(as_completed(future_to_index), total=num_partitions, desc=f'Fetching partitions from {self.project}.{temp_table_name}: '):
                 i = future_to_index[future]
                 try:
                     result_list[i] = future.result()
@@ -150,6 +155,14 @@ class SimpleODPSClient:
 
         # reduce proper
         concatenated_df = pd.concat(result_list, ignore_index=True)
+
+        # delete temp partition table
+        print(f'Dropping temp partition table: {self.project}.{temp_table_name}')
+        self.execute_sql(
+            f'''
+            DROP TABLE IF EXISTS {self.project}.{temp_table_name}; 
+            '''
+        )
 
         return concatenated_df
 

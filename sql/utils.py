@@ -1,4 +1,6 @@
 import re
+import string
+import random
 
 # Extracts SQL Statements separated by ';'
 def extract_sql_statements(sql_script):
@@ -42,3 +44,7 @@ def extract_sql_statements(sql_script):
             statements.append(stmt)
 
     return statements
+
+def random_alphanumeric_string(length=10):
+    chars = string.ascii_letters + string.digits  # a-zA-Z0-9
+    return ''.join(random.choices(chars, k=length))
