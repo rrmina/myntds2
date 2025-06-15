@@ -97,6 +97,62 @@ class SimpleODPSClient:
 
         return self.execute_sql(query_template)
 
+    
+    def mapreduce_execute_sql_to_df(self,
+        query: str = None,              # must be a select statement ONLY
+        num_partitions: int = 32,
+        temp_table: str = 'tmp_rusty'
+    ) -> pd.DataFrame:
+        
+        partition_query = \
+        f'''
+            DROP TABLE IF EXISTS {self.project}.{temp_table};
+            CREATE TABLE IF NOT EXISTS {self.project}.{temp_table} AS (
+                SELECT
+                    *,
+                    NTILE({num_partitions}) OVER () AS partition_num
+                FROM (
+                    {query}
+                )
+            )
+        '''
+
+        # a partition blocking function
+        print(f'Dividing query result into {num_partitions} partitions')
+        _ = self.execute_sql(partition_query)   
+
+        # map definition
+        def fetch_partition(i):
+            df = self.execute_sql_to_df(
+                f'''
+                SELECT *
+                FROM {self.project}.{temp_table}
+                WHERE partition_num = '{i+1}'
+                '''
+            )
+
+            return df
+        
+        # map proper
+        result_list = [None] * num_partitions  # preallocate to maintain order
+        with ThreadPoolExecutor(max_workers=num_partitions) as executor:
+
+            # map
+            future_to_index = {executor.submit(fetch_partition, i): i for i in range(num_partitions)}
+
+            # track status
+            for future in tqdm(as_completed(future_to_index), total=num_partitions, desc=f'Fetching partitions: '):
+                i = future_to_index[future]
+                try:
+                    result_list[i] = future.result()
+                except Exception as e:
+                    print(f"Partition {i + 1} failed: {e}")
+
+        # reduce proper
+        concatenated_df = pd.concat(result_list, ignore_index=True)
+
+        return concatenated_df
+
     def execute_sql_template_to_df(self,
         query_template: str = None,
         args_dict: Dict = None
