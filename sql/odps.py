@@ -114,8 +114,8 @@ class SimpleODPSClient:
             DROP TABLE IF EXISTS {self.project}.{temp_table_name};
             CREATE TABLE IF NOT EXISTS {self.project}.{temp_table_name} AS (
                 SELECT
-                    *,
-                    NTILE({num_partitions}) OVER () AS partition_num
+                    *
+                    , NTILE({num_partitions}) OVER () AS partition_num
                 FROM (
                     {query}
                 )
@@ -130,8 +130,8 @@ class SimpleODPSClient:
         def fetch_partition(i):
             df = self.execute_sql_to_df(
                 f'''
-                SELECT *
-                FROM {self.project}.{temp_table_name}
+                SELECT t.`(partition_num)?+.+`
+                FROM {self.project}.{temp_table_name} t
                 WHERE partition_num = '{i+1}'
                 '''
             )
