@@ -8,6 +8,7 @@ from typing import List, Tuple, Dict, Callable
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from functools import partial
 from tqdm import tqdm
+from odps.tunnel import TableTunnel
 
 from .utils import random_alphanumeric_string
 
