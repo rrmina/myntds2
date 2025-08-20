@@ -372,6 +372,7 @@ class SimpleODPSClient:
     #
     #############################################################################################################
 
+    # LEGACY: Slow!!!
     # TODO : Support multiple partitions
     def save_df(self,
         df: pd.DataFrame,
@@ -394,3 +395,59 @@ class SimpleODPSClient:
         )
 
         return result
+
+    # By default is multi-threaded
+    def upload_df_tunnel(self,
+        df: pd.DataFrame,
+        table_name: str,
+        partitions: str = None,
+        overwrite: bool = True,
+        create_partition: bool = True,
+        chunk_size: int = 1_000_000,
+        n_threads: int = 20,
+        method: Literal['arrow', 'record'] = 'arrow'
+    ):
+        table = self.o.get_table(table_name)
+        tunnel = TableTunnel(self.o)
+
+        # Open upload session for the target partition
+        upload_session = tunnel.create_upload_session(
+            table_name,
+            partition_spec=partitions,
+            overwrite=overwrite,
+            create_partition=create_partition
+        )
+
+        def _upload_block_arrow(df_chunk, block_id, upload_session):
+            with upload_session.open_arrow_writer(block_id=block_id) as writer:
+                writer.write(df_chunk)
+
+        def _upload_block_record(df_chunk, block_id, upload_session, col_names):
+            with upload_session.open_record_writer(block_id) as writer:
+                for row in df_chunk.itertuples(index=False, name=None):
+                    record = upload_session.new_record()
+                    for col, val in zip(col_names, row):
+                        record[col] = None if pd.isna(val) else val
+                    writer.write(record)
+
+        upload_block_fn = None
+        if method == 'arrow':
+            upload_block_fn = _upload_block_arrow
+        elif method == 'record':
+            col_names = [col.name for col in table.table_schema.columns]
+            upload_block_fn = partial(_upload_block_record, col_names=col_names)
+        else:
+            raise ValueError(f"Unknown method: {method}")
+
+        futures = []
+        with ThreadPoolExecutor(max_workers=n_threads) as executor:
+            for block_id, start in enumerate(range(0, len(df), chunk_size)):
+                df_chunk = df.iloc[start:start + chunk_size]
+                futures.append(executor.submit(upload_block_fn, df_chunk, block_id, upload_session))
+
+        # Ensure all blocks succeed before committing
+        for f in futures:
+            f.result()
+
+        upload_session.commit([i for i in range(len(futures))])
+        print(f"🎉 Uploaded {len(df):,} rows into {table_name} partition {partitions} via Arrow Tunnel")
